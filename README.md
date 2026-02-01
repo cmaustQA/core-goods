@@ -37,6 +37,22 @@ This tool leverages **Python** for data processing and **Streamlit** for the use
 3.  **Generation:** The Python script injects the cleaned data into a pre-built HTML5/CSS3 template containing the JavaScript cart logic.
 4.  **Output:** The user downloads a single, portable `.html` file that can be opened in any browser or hosted statically.
 
+## 🧪 Testing Strategy
+This project implements a hybrid testing strategy to ensure reliability across both the data parsing logic and the generated frontend.
+
+### Unit Testing (`pytest`)
+Verifies the Python logic that parses the messy CSV data.
+* **Coverage:** Price extraction regex, bulk threshold detection, dietary badge generation, and junk row filtering.
+* **Goal:** Ensure that changes in the CSV format don't break the pricing engine.
+
+### End-to-End Testing (`Playwright`)
+Verifies the generated HTML artifact behaves correctly in a real browser.
+* **Coverage:**
+    * Simulates a user clicking "Add to Cart".
+    * Verifies the JavaScript cart math (e.g., ensuring floating point math like `$4.49 + $4.99` doesn't result in `$9.48000001`).
+    * Tests the "Search" functionality by typing keystrokes and verifying DOM visibility.
+    * Validates the checkout modal flow.
+
 ## 🚀 Quick Start
 
 ### Running Locally
@@ -66,6 +82,7 @@ To run this tool on your own machine:
 
 ## 📂 Project Structure
 * `convert_menu.py`: The main application logic (Streamlit UI + Parsing Engine).
+* `tests/`: Contains test_parser_logic.py and test_frontend.py.
 * `requirements.txt`: Python dependencies.
 * `README.md`: Project documentation.
 
