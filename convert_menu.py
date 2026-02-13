@@ -3,9 +3,6 @@ import csv
 import re
 import io
 
-# --- PAGE CONFIG ---
-st.set_page_config(page_title="Core Goods Generator", page_icon="🥬", layout="centered")
-
 # --- CONFIGURATION ---
 BADGE_MAP = {
     'gluten-free': {'label': 'GF', 'color': '#e67c23'},
@@ -31,34 +28,46 @@ def generate_badges(text):
     return text + " " + badges_html
 
 def parse_price_info(text):
+    """Parses a price string using a waterfall approach."""
     info = {'std': 0.0, 'bulk': 0.0, 'thresh': 0}
     if not text: return info
     
-    # 1. Get Standard Price (Always the first price listed)
-    std_match = re.search(r'\$?(\d+\.\d{2})', text)
-    if std_match:
-        info['std'] = float(std_match.group(1))
-    elif '$' in text:
-        int_match = re.search(r'\$(\d+)', text)
-        if int_match:
-            info['std'] = float(int_match.group(1))
-
-    # 2. Check for "Bulk Threshold" Pattern (e.g., "$1.65 for 6+")
-    plus_match = re.search(r'\$(\d+\.?\d*).*?(\d+)\+', text)
-    if plus_match:
-        info['bulk'] = float(plus_match.group(1))
-        info['thresh'] = int(plus_match.group(2))
+    # Find all dollar amounts in the string
+    prices = re.findall(r'\$(\d+\.?\d*)', text)
+    
+    # 1. Tiered Deal: "$2.00/each or $1.65/each for 6+"
+    if '+' in text and len(prices) >= 2:
+        info['std'] = float(prices[0])
+        info['bulk'] = float(prices[1])
+        thresh_match = re.search(r'(\d+)\+', text)
+        if thresh_match:
+            info['thresh'] = int(thresh_match.group(1))
         return info
 
-    # 3. Check for "Bundle" Pattern (e.g., "2/$5.99" or "2 for $5.99")
-    bundle_match = re.search(r'\b(\d+)\s*(?:/|for)\s*\$(\d+\.?\d*)', text, re.IGNORECASE)
+    # 2. Bundle Deal: "$3 each / 6 for $15" OR "2/$5.99"
+    bundle_match = re.search(r'(\d+)\s*(?:/|for)\s*\$(\d+\.?\d*)', text)
     if bundle_match:
         qty = int(bundle_match.group(1))
         total_bundle_price = float(bundle_match.group(2))
-        if qty > 0:
-            info['thresh'] = qty
-            info['bulk'] = total_bundle_price / qty # Store per-unit price
-            return info
+        
+        if len(prices) >= 2 and float(prices[0]) != total_bundle_price:
+            info['std'] = float(prices[0])
+        else:
+            info['std'] = total_bundle_price / qty
+            
+        info['bulk'] = total_bundle_price / qty
+        info['thresh'] = qty
+        return info
+
+    # 3. Standard / Integer Fallback
+    if len(prices) > 0:
+        info['std'] = float(prices[0])
+        return info
+        
+    # 4. Raw Number Fallback (If they forgot the $ sign, e.g., "4.99")
+    raw_match = re.search(r'(\d+\.\d{2})', text)
+    if raw_match:
+        info['std'] = float(raw_match.group(1))
 
     return info
 
@@ -96,7 +105,6 @@ def get_html_template(sections, body_content):
     .cg-subheader {{ background: #e8f5e9; padding: 8px 12px; font-weight: 700; color: #1b4d20; border-radius: 6px; margin-top: 20px; font-size: 0.95em; }}
     .cg-badge {{ display: inline-block; font-size: 0.7em; color: white; padding: 2px 6px; border-radius: 4px; margin-left: 6px; vertical-align: middle; font-weight: 700; text-transform: uppercase; }}
     
-    /* CONTROLS */
     .cg-qty-wrapper {{ display: flex; align-items: center; background: #f4f4f4; border-radius: 25px; height: 36px; padding: 2px; }}
     .cg-qty-btn {{ width: 32px; height: 32px; border-radius: 50%; border: none; background: white; cursor: pointer; font-weight: bold; font-size: 18px; color: #2c5e2e; display: flex; align-items: center; justify-content: center; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }}
     .cg-qty-val {{ min-width: 24px; text-align: center; font-weight: bold; font-size: 14px; color: #333; }}
@@ -202,9 +210,6 @@ def get_html_template(sections, body_content):
         for (const [name, item] of Object.entries(cart)) {{
             count += item.qty;
             let p = (item.bulkThresh > 0 && item.qty >= item.bulkThresh) ? item.bulkPrice : item.price;
-            
-            // FIXED ROUNDING LOGIC
-            // Multiply price * qty * 100 first to avoid floating point errors on bundles
             totalCents += Math.round(p * item.qty * 100);
         }}
         return {{ count: count, total: (totalCents / 100).toFixed(2) }};
@@ -225,8 +230,8 @@ def get_html_template(sections, body_content):
         for (const [name, item] of Object.entries(cart)) {{
             let p = item.price; let note = "";
             if (item.bulkThresh > 0 && item.qty >= item.bulkThresh) {{ p = item.bulkPrice; note = `<span style="color:#27ae60; font-size:0.8em; margin-left:5px;">(Bulk!)</span>`; }}
-            else if (item.bulkThresh > 0) {{ note = `<span style="color:#e67c23; font-size:0.8em; margin-left:5px;">(Buy ${{item.bulkThresh}} for $${{item.bulkPrice}} ea)</span>`; }}
-            container.innerHTML += `<div class="cg-cart-item"><div class="cg-cart-name">${{name}} ${{note}}<br><span style="font-weight:normal; font-size:0.85em; color:#666;">@ $${{p}}</span></div><div class="cg-cart-controls"><button class="cg-qty-btn" onclick="triggerUpdate('${{name}}', -1)">-</button><span class="cg-qty">${{item.qty}}</span><button class="cg-qty-btn" onclick="triggerUpdate('${{name}}', 1)">+</button></div></div>`;
+            else if (item.bulkThresh > 0) {{ note = `<span style="color:#e67c23; font-size:0.8em; margin-left:5px;">(Buy ${{item.bulkThresh}} for $${{item.bulkPrice.toFixed(2)}} ea)</span>`; }}
+            container.innerHTML += `<div class="cg-cart-item"><div class="cg-cart-name">${{name}} ${{note}}<br><span style="font-weight:normal; font-size:0.85em; color:#666;">@ $${{p.toFixed(2)}}</span></div><div class="cg-cart-controls"><button class="cg-qty-btn" onclick="triggerUpdate('${{name}}', -1)">-</button><span class="cg-qty">${{item.qty}}</span><button class="cg-qty-btn" onclick="triggerUpdate('${{name}}', 1)">+</button></div></div>`;
         }}
     }}
 
@@ -238,7 +243,7 @@ def get_html_template(sections, body_content):
         for (const [name, item] of Object.entries(cart)) {{
             let p = (item.bulkThresh > 0 && item.qty >= item.bulkThresh) ? item.bulkPrice : item.price;
             let lbl = (p < item.price) ? " (BULK)" : "";
-            body += `- [${{item.qty}}x] ${{name}} @ $${{p}}${{lbl}}\\n`;
+            body += `- [${{item.qty}}x] ${{name}} @ $${{p.toFixed(2)}}${{lbl}}\\n`;
         }}
         const res = calculateTotal();
         body += `\\nEstimated Total: $${{res.total}}\\n\\nThanks!`;
@@ -268,17 +273,9 @@ def get_html_template(sections, body_content):
 </html>
     """
 
-# --- MAIN APP UI ---
-
-st.title("🥬 Core Goods Menu Generator")
-st.markdown("Upload your weekly `CSV` file to generate the updated mobile-friendly website.")
-
-uploaded_file = st.file_uploader("Upload CSV", type="csv")
-
-if uploaded_file is not None:
-    stringio = io.StringIO(uploaded_file.getvalue().decode("utf-8", errors='replace'))
-    reader = csv.reader(stringio)
-    
+# --- REUSABLE LOGIC (Separated from UI) ---
+def convert_data_to_html(file_obj):
+    reader = csv.reader(file_obj)
     sections = []
     body_content = ""
     
@@ -303,56 +300,95 @@ if uploaded_file is not None:
 
         # 3. Handle Items
         if row[0]:
-            name = row[0].replace('"', '&quot;')
-            price_str = row[1] if len(row) > 1 else ""
+            base_name = row[0].replace('"', '&quot;')
+            raw_price_str = row[1] if len(row) > 1 else ""
             notes = " ".join(row[2:]) if len(row) > 2 else ""
             
-            p_info = parse_price_info(price_str)
-            display_price = price_str if price_str else "See details"
+            # --- THE MAGIC FIX ---
+            # Look for explicit sizes (sm, lg, pt, qt, half, whole) next to a price
+            size_matches = re.findall(r'\$?(\d+(?:\.\d{2})?)\s*(sm|lg|small|large|pt|qt|pint|quart|half|whole)\b', raw_price_str, re.IGNORECASE)
             
-            # --- THE FIX: Only generate button if price > 0 ---
-            button_html = ""
-            if p_info['std'] > 0:
-                safe_id = re.sub(r'[^a-zA-Z0-9]', '', name)
-                ctrl_id = 'ctrl-' + safe_id
+            items_to_render = []
+            
+            # If we find MULTIPLE sizes in one row, we split them into distinct products
+            if len(size_matches) > 1:
+                for price_val, size_lbl in size_matches:
+                    items_to_render.append({
+                        'name': f"{base_name} ({size_lbl})",
+                        'price_str': f"${price_val}",
+                        'notes': notes
+                    })
+            else:
+                # Normal behavior for standard items or bundle deals
+                items_to_render.append({
+                    'name': base_name,
+                    'price_str': raw_price_str,
+                    'notes': notes
+                })
+
+            # Render HTML for each item (or split items)
+            for item in items_to_render:
+                name = item['name']
+                price_str = item['price_str']
+                item_notes = item['notes']
                 
-                button_html = f"""
-                <div class="cg-qty-wrapper" 
-                     id="{ctrl_id}"
-                     data-p="{p_info['std']}"
-                     data-bp="{p_info['bulk']}"
-                     data-bt="{p_info['thresh']}"
-                     data-r="{display_price}">
-                    <button class="cg-add-btn" 
-                            onclick="updateQty('{name}', {p_info['std']}, {p_info['bulk']}, {p_info['thresh']}, '{display_price}', 1)">
-                        +
-                    </button>
+                p_info = parse_price_info(price_str)
+                display_price = price_str if price_str else "See details"
+                
+                button_html = ""
+                if p_info['std'] > 0:
+                    safe_id = re.sub(r'[^a-zA-Z0-9]', '', name)
+                    ctrl_id = 'ctrl-' + safe_id
+                    
+                    button_html = f"""
+                    <div class="cg-qty-wrapper" 
+                         id="{ctrl_id}"
+                         data-p="{p_info['std']}"
+                         data-bp="{p_info['bulk']}"
+                         data-bt="{p_info['thresh']}"
+                         data-r="{display_price}">
+                        <button class="cg-add-btn" 
+                                onclick="updateQty('{name}', {p_info['std']}, {p_info['bulk']}, {p_info['thresh']}, '{display_price}', 1)">
+                            +
+                        </button>
+                    </div>
+                    """
+                
+                price_class = "cg-price" if p_info['std'] > 0 else "cg-price unknown"
+
+                body_content += f"""
+                <div class="cg-item-row" data-search="{name.lower()} {item_notes.lower()}">
+                    <div class="cg-item-info">
+                        <span class="cg-name">{name}</span>
+                        <span class="cg-meta">{generate_badges(item_notes)}</span>
+                        <span class="{price_class}">{display_price}</span>
+                    </div>
+                    {button_html}
                 </div>
                 """
-            
-            price_class = "cg-price" if p_info['std'] > 0 else "cg-price unknown"
 
-            body_content += f"""
-            <div class="cg-item-row" data-search="{name.lower()} {notes.lower()}">
-                <div class="cg-item-info">
-                    <span class="cg-name">{name}</span>
-                    <span class="cg-meta">{generate_badges(notes)}</span>
-                    <span class="{price_class}">{display_price}</span>
-                </div>
-                {button_html}
-            </div>
-            """
+    return get_html_template(sections, body_content)
 
-    full_html = get_html_template(sections, body_content)
+# --- MAIN UI (Protected by __main__) ---
+if __name__ == "__main__":
+    st.set_page_config(page_title="Core Goods Generator", page_icon="🥬", layout="centered")
+    st.title("🥬 Core Goods Menu Generator")
+    st.markdown("Upload your weekly `CSV` file to generate the updated mobile-friendly website.")
 
-    st.success("✅ Conversion Complete!")
-    
-    st.download_button(
-        label="Download Website HTML",
-        data=full_html,
-        file_name="core_goods_menu.html",
-        mime="text/html"
-    )
+    uploaded_file = st.file_uploader("Upload CSV", type="csv")
 
-    st.subheader("Preview")
-    st.components.v1.html(full_html, height=600, scrolling=True)
+    if uploaded_file is not None:
+        stringio = io.StringIO(uploaded_file.getvalue().decode("utf-8", errors='replace'))
+        full_html = convert_data_to_html(stringio)
+
+        st.success("✅ Conversion Complete!")
+        
+        st.download_button(
+            label="Download Website HTML",
+            data=full_html,
+            file_name="core_goods_menu.html",
+            mime="text/html"
+        )
+
+        st.subheader("Preview")
+        st.components.v1.html(full_html, height=600, scrolling=True)
