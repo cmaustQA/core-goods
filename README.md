@@ -60,7 +60,7 @@ To run this tool on your own machine:
 
 1.  Clone the repository:
     ```bash
-    git clone [https://github.com/cmaustQA/core-goods.git](https://github.com/cmaustQA/core-goods.git)
+    git clone https://github.com/cmaustQA/core-goods.git
     cd core-goods
     ```
 
