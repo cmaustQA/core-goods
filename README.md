@@ -60,13 +60,14 @@ To run this tool on your own machine:
 
 1.  Clone the repository:
     ```bash
-    git clone [https://github.com/yourusername/core-goods-generator.git](https://github.com/yourusername/core-goods-generator.git)
-    cd core-goods-generator
+    git clone [https://github.com/cmaustQA/core-goods.git](https://github.com/cmaustQA/core-goods.git)
+    cd core-goods
     ```
 
 2.  Install dependencies:
     ```bash
     pip install -r requirements.txt
+    playwright install
     ```
 
 3.  Run the Streamlit app:
